@@ -1,0 +1,54 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: filesharer_web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - SQLITE_DB_PATH=/data/database.sqlite
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_BUCKET=${MINIO_BUCKET}
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_USE_SSL=false
+      - MINIO_EXTERNAL_ENDPOINT=${MINIO_EXTERNAL_ENDPOINT}
+    volumes:
+      - app_data:/data
+    depends_on:
+      - minio
+
+  minio:
+    image: minio/minio:latest
+    container_name: filesharer_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: filesharer_tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - web
+
+volumes:
+  app_data:
+  minio_data:
