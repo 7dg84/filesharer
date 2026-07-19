@@ -1,15 +1,22 @@
 # Filesharer & Shortener
 
-Una aplicación web moderna, segura y de diseño premium para acortar enlaces y compartir archivos, completamente contenedorizada en Docker y lista para ser expuesta al público con un túnel de Cloudflare.
+Una aplicación web moderna, segura y de diseño premium para acortar enlaces y compartir archivos, completamente contenedorizada en Docker y lista para ser expuesta al público con un túnel de Cloudflare. 
+
+Esta solución cuenta con organización por carpetas y etiquetas, permitiendo gestionar enlaces y almacenamiento físico mediante firmas temporales de S3 en un entorno autohospedado (self-hosted).
+
+---
 
 ## Características
 
-- 🔗 **Acortador de URLs**: Crea enlaces cortos con un nombre descriptivo y monitorea el número de clics en tiempo real.
-- 📁 **Gestor de Archivos (MinIO)**: Sube y descarga archivos de manera segura directamente a MinIO a través de firmas temporales de AWS S3 (Presigned URLs).
-- 🌓 **Modo Oscuro / Claro**: Interfaz de diseño premium con soporte de tema claro/oscuro que respeta tus preferencias y se adapta con transiciones suaves.
-- 🔒 **Acceso Protegido**: Acceso con usuario y contraseña protegido por JWT (JSON Web Tokens) guardados en cookies HttpOnly.
+- 🔗 **Acortador de URLs**: Crea enlaces cortos con un nombre descriptivo y monitorea el número de clics en tiempo real. Redirecciona instantáneamente mediante el prefijo `/s/:code`.
+- 📁 **Gestor de Archivos (MinIO)**: Sube y descarga archivos de manera segura directamente a MinIO mediante firmas temporales (Presigned URLs) con seguimiento del progreso de subida.
+- 🗂️ **Carpetas**: Agrupa tus enlaces y archivos en directorios virtuales separados según el módulo correspondiente.
+- 🏷️ **Etiquetas (Tags)**: Clasifica transversalmente tu contenido con etiquetas coloridas generadas dinámicamente según el nombre del tag.
+- 🔍 **Filtros Avanzados**: Filtrado inmediato de tablas mediante buscador en tiempo real y selectores de carpeta o etiqueta.
+- 🌓 **Modo Oscuro / Claro**: Interfaz premium con soporte de tema claro y oscuro que respeta tus preferencias y se adapta con transiciones fluidas.
+- 🔒 **Acceso Protegido**: Acceso con usuario y contraseña protegido por JWT (JSON Web Tokens) guardados en cookies HTTP-only.
 - 🐋 **Dockerizado**: Configurado en Docker Compose listo para ejecutarse en cualquier entorno con una base de datos SQLite integrada.
-- ☁️ **Cloudflare Tunnel**: Servicio integrado para exponer tu aplicación local de forma segura al internet sin necesidad de abrir puertos (CGNAT bypass).
+- ☁️ **Cloudflare Tunnel**: Servicio integrado para exponer tu aplicación local de forma segura a internet sin necesidad de abrir puertos (CGNAT bypass) usando HTTPS automático.
 
 ---
 
@@ -26,8 +33,8 @@ Una aplicación web moderna, segura y de diseño premium para acortar enlaces y 
 /filesharer
 ├── backend/
 │   ├── src/
-│   │   ├── config/           # Configuración de base de datos SQLite y MinIO
-│   │   ├── controllers/      # Controladores de auth, urls y archivos
+│   │   ├── config/           # Configuración de base de datos SQLite y clientes de MinIO
+│   │   ├── controllers/      # Controladores de auth, urls, archivos y carpetas
 │   │   ├── middleware/       # Autenticación segura mediante JWT
 │   │   ├── routes/           # Rutas expuestas de la API REST
 │   │   └── index.js          # Entrada del servidor y redirección rápida de enlaces
@@ -62,7 +69,7 @@ cp .env.example .env
 Abre el archivo `.env` y personaliza los valores si lo deseas:
 - El usuario inicial por defecto se creará con las variables `ADMIN_USERNAME` y `ADMIN_PASSWORD`.
 - Cambia la variable `JWT_SECRET` por una cadena de caracteres aleatoria.
-- Deja `CLOUDFLARE_TUNNEL_TOKEN` vacío en desarrollo local.
+- Configura `CLOUDFLARE_TUNNEL_TOKEN` si planeas exponerlo a internet.
 
 ### 2. Iniciar la Aplicación
 
@@ -73,11 +80,11 @@ docker compose up --build -d
 ```
 
 Este comando:
-1. Construirá y empaquetará el frontend de React.
+1. Compilará y empaquetará el frontend de React.
 2. Levantará el servidor backend de Express en el puerto `3000`.
 3. Levantará el servidor de MinIO en los puertos `9000` (API de almacenamiento) y `9001` (Consola de control web).
 4. Inicializará y configurará el Bucket en MinIO automáticamente en el primer arranque.
-5. Sembrará las tablas y el usuario administrador en la base de datos local SQLite.
+5. Creará y migrará la base de datos local SQLite (`database.sqlite`) para dar de alta las tablas e insertar el usuario semilla de administración.
 
 ### 3. Acceder a los Servicios
 
@@ -97,18 +104,38 @@ Si deseas que la aplicación sea accesible públicamente desde internet con HTTP
    ```env
    CLOUDFLARE_TUNNEL_TOKEN=tu_token_de_cloudflare_aqui
    ```
-5. En Cloudflare, asocia un subdominio de tu propiedad (ej: `compartidor.midominio.com`) y apúntalo a la URL interna del contenedor: `http://web:3000`.
-6. Si expones MinIO externamente para las descargas/subidas, cambia la variable `MINIO_EXTERNAL_ENDPOINT` en tu archivo `.env` al subdominio público asignado en el túnel para que los clientes del navegador puedan conectarse desde cualquier parte de internet.
+5. En Cloudflare, asocia dos subdominios:
+   *   `filesharer.tudominio.com` apuntando internamente a `http://web:3000`.
+   *   `s3-filesharer.tudominio.com` apuntando internamente a `http://minio:9000` (API).
+6. Cambia la variable `MINIO_EXTERNAL_ENDPOINT` en tu archivo `.env` al subdominio público asignado al puerto `9000` (`https://s3-filesharer.tudominio.com`). Esto evitará el error `SignatureDoesNotMatch` asegurando que la firma S3 se calcule con el mismo dominio con el que el navegador realiza la carga directa.
 7. Reinicia los servicios de Docker:
    ```bash
-   docker compose restart cloudflared
+   docker compose up -d
    ```
-8. ¡Listo! Cloudflare se encargará de establecer el túnel cifrado y tu aplicación estará disponible globalmente de forma segura.
+
+---
+
+## Detalles Técnicos
+
+### 1. Modelo de Datos (SQLite)
+La base de datos SQLite se crea en la ruta definida en `.env`. Su esquema está optimizado para consultas rápidas de metadatos:
+- **`users`**: Administra los usuarios registrados para el control de acceso.
+- **`folders`**: Almacena las carpetas virtuales para agrupar urls y archivos (`type`: `'url'` o `'file'`).
+- **`urls`**: Almacena el enlace descriptivo, su url original, el código corto aleatorio, el contador de clics, la fecha, y su relación con carpetas (`folder_id`) y etiquetas (`tags` en formato de cadena JSON).
+- **`file_metadata`**: Guarda la relación de los archivos físicos subidos a MinIO (identificados por su nombre de clave único) con las carpetas virtuales de SQLite y sus etiquetas para permitir búsquedas cruzadas y filtrados rápidos en el frontend.
+
+### 2. Integración de MinIO (Almacenamiento por Presigned URLs)
+Para optimizar el uso de recursos del backend, el flujo de subida de archivos no consume ancho de banda del servidor de Node.js:
+1. El frontend solicita al backend una URL pre-firmada enviando el tipo de archivo y tamaño.
+2. El backend utiliza `minioSignClient` (configurado con el endpoint externo) para generar una URL segura de tipo `PUT` válida por 10 minutos.
+3. El frontend sube el archivo **directamente** a MinIO realizando una petición HTTP `PUT` al endpoint retornado, monitoreando el progreso mediante XMLHttpRequest.
+4. El backend registra paralelamente los metadatos de organización en SQLite.
+5. Las descargas se gestionan mediante una ruta intermedia en el backend que redirige al navegador de forma segura con un estado `302` hacia una URL temporal de tipo `GET` firmada con 5 minutos de validez.
 
 ---
 
 ## Tecnologías Utilizadas
 
 - **Backend**: Node.js, Express, SQLite (mediante el driver `sqlite3`), MinIO Javascript SDK (compatible con AWS S3 API).
-- **Frontend**: React (Vite), CSS Puro (Vanila CSS, Variables CSS), Lucide React (Iconografía premium).
+- **Frontend**: React (Vite), CSS Puro (Vanilla CSS, variables y transiciones de temas CSS), Lucide React (Iconografía premium).
 - **Contenedores**: Docker, Docker Compose, Cloudflared.
