@@ -93,6 +93,26 @@ Este comando:
 
 ---
 
+## Publicación de la imagen en Docker Hub
+
+El workflow de GitHub Actions compila la imagen usando `backend/Dockerfile` y publica
+`<DOCKER_USERNAME>/filesharer` en Docker Hub en cada push. Crea el repositorio `filesharer`
+en Docker Hub bajo la cuenta indicada y, en **Settings > Secrets and variables > Actions**,
+configura estos secretos del repositorio:
+
+- `DOCKER_USERNAME`: nombre de usuario de Docker Hub.
+- `DOCKER_PASSWORD`: un access token de Docker Hub con permiso de escritura.
+
+Se publican etiquetas con el nombre de la rama y el commit (`sha-<commit>`); la etiqueta
+`latest` se publica únicamente para la rama predeterminada del repositorio. Por ejemplo,
+para descargar la imagen de producción:
+
+```bash
+docker pull <DOCKER_USERNAME>/filesharer:latest
+```
+
+---
+
 ## Exposición a Internet mediante Cloudflare Tunnel
 
 Si deseas que la aplicación sea accesible públicamente desde internet con HTTPS gratuito sin abrir puertos en tu router:
